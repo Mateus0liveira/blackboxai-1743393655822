@@ -6,11 +6,21 @@ import time
 
 ua = UserAgent()
 
+def normalize_query(query):
+    """Extract key product terms from long descriptions"""
+    # Remove special characters and model numbers if they don't help search
+    query = re.sub(r'[^a-zA-Z0-9\s]', '', query)
+    # Take first 3-5 meaningful words
+    terms = [word for word in query.split() if len(word) > 3][:5]
+    return ' '.join(terms)
+
 def get_products(query):
+    normalized_query = normalize_query(query)
     sites = {
-        'Amazon': f'https://www.amazon.com/s?k={query}',
-        'Mercado Livre': f'https://lista.mercadolivre.com.br/{query}',
-        'Americanas': f'https://www.americanas.com.br/busca/{query}'
+        'Amazon': f'https://www.amazon.com/s?k={normalized_query.replace(" ", "+")}',
+        'Mercado Livre': f'https://lista.mercadolivre.com.br/{normalized_query.replace(" ", "-")}',
+        'Americanas': f'https://www.americanas.com.br/busca/{normalized_query.replace(" ", "-")}',
+        'Casas Bahia': f'https://www.casasbahia.com.br/busca/{normalized_query.replace(" ", "-")}'
     }
     
     products = []
@@ -20,14 +30,37 @@ def get_products(query):
             response = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Example extraction logic (will need site-specific selectors)
-            items = soup.select('.product-item')[:5]  # Generic selector
+            # Site-specific selectors
+            if site == 'Amazon':
+                items = soup.select('[data-component-type="s-search-result"]')[:8]
+            elif site == 'Mercado Livre':
+                items = soup.select('.ui-search-layout__item')[:8]
+            elif site == 'Americanas':
+                items = soup.select('[data-testid="product-card"]')[:8]
+            elif site == 'Casas Bahia':
+                items = soup.select('.ProductGrid__GridCell')[:8]
             
             for item in items:
                 try:
-                    name = item.select_one('.product-name').text.strip()
-                    price = float(item.select_one('.price').text.replace('R$','').replace(',','.').strip())
-                    link = item.find('a')['href']
+                    # Site-specific extraction
+                    if site == 'Amazon':
+                        name = item.select_one('h2 a span').text.strip()
+                        price_whole = item.select_one('.a-price-whole').text.strip()
+                        price_fraction = item.select_one('.a-price-fraction').text.strip()
+                        price = float(f'{price_whole}{price_fraction}'.replace('.','').replace(',','.'))
+                        link = 'https://amazon.com' + item.select_one('h2 a')['href']
+                    elif site == 'Mercado Livre':
+                        name = item.select_one('.ui-search-item__title').text.strip()
+                        price = float(item.select_one('.price-tag-fraction').text.replace('.','').replace(',','.'))
+                        link = item.select_one('.ui-search-link')['href']
+                    elif site == 'Americanas':
+                        name = item.select_one('[data-testid="product-name"]').text.strip()
+                        price = float(item.select_one('[data-testid="price-value"]').text.replace('R$','').replace('.','').replace(',','.'))
+                        link = 'https://www.americanas.com.br' + item.select_one('a')['href']
+                    elif site == 'Casas Bahia':
+                        name = item.select_one('.ProductCard__Name').text.strip()
+                        price = float(item.select_one('.ProductPrice__Price').text.replace('R$','').replace('.','').replace(',','.'))
+                        link = 'https://www.casasbahia.com.br' + item.select_one('a')['href']
                     
                     product = {
                         'name': name,
